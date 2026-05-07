@@ -172,12 +172,21 @@ fn apply_threshold(content: &str, data: &UsageLimitsData, cfg: &CshipConfig) -> 
     )
 }
 
-/// Render the usage limits module (5h + 7d + per-model + extra usage combined).
+/// Render the usage limits module.
+///
+/// On Pro/Max plans this is the full 5h + 7d (+ optional per-model + optional extra)
+/// composition produced by `format_output`. On Enterprise plans (where the API returns
+/// 5h/7d as null), `render` short-circuits to the `extra_usage` section only.
 pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
     let data = resolve_data(ctx, cfg)?;
     let default_ul_cfg = UsageLimitsConfig::default();
     let ul_cfg = cfg.usage_limits.as_ref().unwrap_or(&default_ul_cfg);
-    let content = format_output(&data, ul_cfg);
+
+    let content = if lacks_standard_signal(&data) {
+        format_extra_usage(&data, ul_cfg)?
+    } else {
+        format_output(&data, ul_cfg)
+    };
     Some(apply_threshold(&content, &data, cfg))
 }
 
@@ -2186,5 +2195,52 @@ mod tests {
         let result = format_output(&data, &cfg);
         assert_eq!(result, "50% | 30%", "no trailing separator: {result:?}");
         assert!(!result.ends_with(" | "), "no dangling sep: {result:?}");
+    }
+
+    #[test]
+    fn test_render_enterprise_extra_usage_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_path = tmp.path().join("transcript.jsonl");
+        std::fs::write(&transcript_path, "").unwrap();
+
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(19411.0),
+            extra_usage_utilization: Some(97.055),
+            ..Default::default()
+        };
+        crate::cache::write_usage_limits(&transcript_path, &data, 600);
+
+        let ctx = Context {
+            transcript_path: Some(transcript_path.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let cfg = CshipConfig::default();
+        let out = render(&ctx, &cfg).expect("Enterprise: extra_usage_only must render");
+        assert!(!out.contains("5h:"), "must not include 5h section: {out}");
+        assert!(!out.contains("7d:"), "must not include 7d section: {out}");
+        assert!(out.contains("19411"), "must include used credits: {out}");
+        assert!(out.contains("20000"), "must include limit: {out}");
+    }
+
+    #[test]
+    fn test_render_enterprise_extra_disabled_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_path = tmp.path().join("transcript.jsonl");
+        std::fs::write(&transcript_path, "").unwrap();
+
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(false),
+            ..Default::default()
+        };
+        crate::cache::write_usage_limits(&transcript_path, &data, 600);
+
+        let ctx = Context {
+            transcript_path: Some(transcript_path.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let cfg = CshipConfig::default();
+        assert!(render(&ctx, &cfg).is_none());
     }
 }
