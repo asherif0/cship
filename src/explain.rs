@@ -188,7 +188,7 @@ fn is_disabled(name: &str, cfg: &crate::config::CshipConfig) -> bool {
 
 fn error_hint_for(
     name: &str,
-    _ctx: &crate::context::Context,
+    ctx: &crate::context::Context,
     cfg: &crate::config::CshipConfig,
 ) -> (String, String) {
     let top = name.strip_prefix("cship.").unwrap_or(name);
@@ -240,10 +240,31 @@ fn error_hint_for(
                     "usage_limits returned no data — no Claude Code credential found".into(),
                     "Authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
                 ),
-                Ok(_) => (
-                    "usage_limits returned no data — credential present but API fetch failed".into(),
-                    "Your Claude Code token may have expired. Re-authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
-                ),
+                Ok(_) => {
+                    // Distinguish "Enterprise plan with no extra credits enabled" from
+                    // "fetch failed". If the cache holds a successful but empty payload,
+                    // it's the former.
+                    let cached = ctx
+                        .transcript_path
+                        .as_deref()
+                        .map(std::path::Path::new)
+                        .and_then(|p| crate::cache::read_usage_limits(p, true));
+                    match cached {
+                        Some(d)
+                            if crate::modules::usage_limits::lacks_standard_signal(&d)
+                                && d.extra_usage_enabled != Some(true) =>
+                        {
+                            (
+                                "usage_limits returned no data — your plan reports no usage windows or extra credits".into(),
+                                "If you're on Claude Enterprise, ask your admin to verify extra-credit billing is enabled for your account.".into(),
+                            )
+                        }
+                        _ => (
+                            "usage_limits returned no data — credential present but API fetch failed".into(),
+                            "Your Claude Code token may have expired. Re-authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
+                        ),
+                    }
+                }
                 Err(_) => (
                     "usage_limits returned no data — credential appears malformed or tool unavailable".into(),
                     "Re-authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
@@ -544,6 +565,43 @@ mod tests {
         assert!(
             remediation.contains("login flow"),
             "remediation must include login flow instruction, got: {remediation}"
+        );
+    }
+
+    #[test]
+    fn test_enterprise_no_extra_credits_hint() {
+        // Cache holds a successfully-fetched payload with no signal at all.
+        // get_oauth_token() succeeds (covered by environment in real runs);
+        // here we exercise the inner branch by priming the cache and calling
+        // error_hint_for with a transcript_path pointing at it.
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_path = tmp.path().join("transcript.jsonl");
+        std::fs::write(&transcript_path, "").unwrap();
+
+        let empty = crate::usage_limits::UsageLimitsData::default();
+        crate::cache::write_usage_limits(&transcript_path, &empty, 600);
+
+        let ctx = crate::context::Context {
+            transcript_path: Some(transcript_path.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let cfg = crate::config::CshipConfig::default();
+
+        // Skip if no real OAuth credential is present in the environment;
+        // the hint we want exercises the `Ok(_)` arm. CI runs without a
+        // credential, so we guard with the same probe used by error_hint_for.
+        if crate::platform::get_oauth_token().is_err() {
+            return;
+        }
+
+        let (msg, hint) = error_hint_for("usage_limits", &ctx, &cfg);
+        assert!(
+            msg.contains("plan reports no usage windows or extra credits"),
+            "unexpected msg: {msg}"
+        );
+        assert!(
+            hint.contains("Claude Enterprise"),
+            "unexpected hint: {hint}"
         );
     }
 }
