@@ -496,35 +496,44 @@ fn model_entries<'a>(
 
 /// Format the extra usage section. Returns `None` when extra usage is absent or disabled.
 ///
-/// The `{active}` placeholder renders `"⚡"` when either 5h or 7d utilization is at 100%
-/// (meaning requests are currently consuming extra credits), or `"💤"` otherwise.
+/// `{active}` glyph rules:
+/// - Pro/Max: `⚡` when either 5h or 7d utilization is at 100%, else `💤`.
+/// - Enterprise (no 5h/7d signal): `⚡` once `extra_usage_utilization` exceeds
+///   `warn_threshold`, or for any non-zero utilization when no threshold is
+///   configured. Otherwise `💤`.
 fn format_extra_usage(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> Option<String> {
     if data.extra_usage_enabled != Some(true) {
         return None;
     }
     let eu_pct = data
         .extra_usage_utilization
-        .map(|v| format!("{:.0}", v))
+        .map(|v| format!("{v:.0}"))
         .unwrap_or_else(|| "?".into());
     let eu_used = data
         .extra_usage_used_credits
-        .map(|v| format!("{:.2}", v / 100.0))
+        .map(|v| format!("{v:.0}"))
         .unwrap_or_else(|| "?".into());
     let eu_limit = data
         .extra_usage_monthly_limit
-        .map(|v| format!("{:.0}", v / 100.0))
+        .map(|v| format!("{v:.0}"))
         .unwrap_or_else(|| "?".into());
     let eu_remaining_credits = match (
         data.extra_usage_monthly_limit,
         data.extra_usage_used_credits,
     ) {
-        (Some(limit), Some(used)) => format!("{:.2}", (limit - used).max(0.0) / 100.0),
+        (Some(limit), Some(used)) => format!("{:.0}", (limit - used).max(0.0)),
         _ => "?".into(),
     };
     let active = if data.five_hour_pct >= 100.0 || data.seven_day_pct >= 100.0 {
         "\u{26a1}" // ⚡
+    } else if lacks_standard_signal(data) {
+        let threshold = cfg.warn_threshold.unwrap_or(0.0);
+        match data.extra_usage_utilization {
+            Some(u) if u > threshold => "\u{26a1}",
+            _ => "\u{1f4a4}", // 💤
+        }
     } else {
-        "\u{1f4a4}" // 💤
+        "\u{1f4a4}"
     };
     let eu_fmt = cfg
         .extra_usage_format
@@ -871,7 +880,10 @@ mod tests {
         let styled = apply_threshold("X", &data, &cfg);
         // Critical style should have wrapped the content with ANSI escapes.
         assert_ne!(styled, "X", "expected critical styling to apply");
-        assert!(styled.contains('\x1b'), "expected ANSI escape; got {styled:?}");
+        assert!(
+            styled.contains('\x1b'),
+            "expected ANSI escape; got {styled:?}"
+        );
     }
 
     #[test]
@@ -1674,8 +1686,8 @@ mod tests {
             "active indicator (⚡) when 5h at 100%: {result:?}"
         );
         assert!(result.contains("31%"), "extra pct in: {result:?}");
-        assert!(result.contains("61.95"), "used credits in: {result:?}");
-        assert!(result.contains("200"), "monthly limit in: {result:?}");
+        assert!(result.contains("6195"), "used credits in: {result:?}");
+        assert!(result.contains("20000"), "monthly limit in: {result:?}");
     }
 
     #[test]
@@ -1769,7 +1781,7 @@ mod tests {
         let result = format_output(&data, &cfg);
         assert!(result.contains("EXTRA 31%"), "custom format: {result:?}");
         assert!(
-            result.contains("rem:138.05"),
+            result.contains("rem:13805"),
             "remaining credits: {result:?}"
         );
     }
@@ -2014,7 +2026,7 @@ mod tests {
             ..Default::default()
         };
         let out = format_extra_usage(&data, &cfg).expect("extra_usage should render");
-        assert!(out.contains("rem=138.05"), "remaining_credits: {out:?}");
+        assert!(out.contains("rem=13805"), "remaining_credits: {out:?}");
         assert!(out.contains("pct=31"), "pct still works: {out:?}");
     }
 
@@ -2040,6 +2052,120 @@ mod tests {
             out, "rem={remaining}",
             "literal {{remaining}} should pass through untouched"
         );
+    }
+
+    #[test]
+    fn test_format_extra_usage_renders_whole_units() {
+        // Regression: API values are dollars, not cents. Default format must show
+        // $19411 / $20000, not $194 / $200.
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(19411.0),
+            extra_usage_utilization: Some(97.055),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig::default();
+        let out = format_extra_usage(&data, &cfg).expect("extra_usage enabled => Some");
+        assert!(
+            out.contains("19411"),
+            "expected $19411 in output, got: {out}"
+        );
+        assert!(
+            out.contains("20000"),
+            "expected $20000 in output, got: {out}"
+        );
+        assert!(!out.contains("$194 "), "must not divide by 100; got: {out}");
+    }
+
+    #[test]
+    fn test_format_extra_usage_remaining_credits_whole_units() {
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(19411.0),
+            extra_usage_utilization: Some(97.055),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            extra_usage_format: Some("rem ${remaining_credits}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("extra_usage enabled => Some");
+        assert_eq!(out, "rem $589");
+    }
+
+    #[test]
+    fn test_active_glyph_on_enterprise_above_warn() {
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(17000.0),
+            extra_usage_utilization: Some(85.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            warn_threshold: Some(80.0),
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(out, "\u{26a1}", "above warn => lightning bolt");
+    }
+
+    #[test]
+    fn test_active_glyph_on_enterprise_below_warn() {
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(10000.0),
+            extra_usage_utilization: Some(50.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            warn_threshold: Some(80.0),
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(out, "\u{1f4a4}", "below warn => sleep emoji");
+    }
+
+    #[test]
+    fn test_active_glyph_on_enterprise_no_threshold_any_usage() {
+        // No warn_threshold configured — ANY non-zero utilization shows ⚡.
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_utilization: Some(0.1),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(20.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(out, "\u{26a1}");
+    }
+
+    #[test]
+    fn test_active_glyph_pro_max_unchanged_at_5h_full() {
+        // Pre-existing semantic: ⚡ when 5h or 7d at 100%, regardless of extra_usage.
+        let data = UsageLimitsData {
+            five_hour_pct: 100.0,
+            extra_usage_enabled: Some(true),
+            extra_usage_utilization: Some(0.0),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(0.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(out, "\u{26a1}");
     }
 
     #[test]
