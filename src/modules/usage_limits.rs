@@ -151,12 +151,19 @@ pub(crate) fn lacks_standard_signal(data: &UsageLimitsData) -> bool {
 }
 
 /// Apply threshold styling using the higher of 5h/7d utilization.
+/// Falls back to `extra_usage_utilization` when both standard signals are zero
+/// (Enterprise plans where 5h/7d data is absent).
 fn apply_threshold(content: &str, data: &UsageLimitsData, cfg: &CshipConfig) -> String {
     let ul_cfg = cfg.usage_limits.as_ref();
-    let max_pct = data.five_hour_pct.max(data.seven_day_pct);
+    let standard_max = data.five_hour_pct.max(data.seven_day_pct);
+    let pct = if standard_max > 0.0 {
+        standard_max
+    } else {
+        data.extra_usage_utilization.unwrap_or(0.0)
+    };
     crate::ansi::apply_style_with_threshold(
         content,
-        Some(max_pct),
+        Some(pct),
         ul_cfg.and_then(|c| c.style.as_deref()),
         ul_cfg.and_then(|c| c.warn_threshold),
         ul_cfg.and_then(|c| c.warn_style.as_deref()),
@@ -842,6 +849,50 @@ mod tests {
             result.contains('\x1b'),
             "expected ANSI codes for critical: {result:?}"
         );
+    }
+
+    // ── apply_threshold() extra_usage fallback tests ─────────────────────────
+
+    #[test]
+    fn test_apply_threshold_uses_extra_usage_when_standard_absent() {
+        use crate::config::CshipConfig;
+        let data = UsageLimitsData {
+            extra_usage_utilization: Some(85.0),
+            ..Default::default()
+        };
+        let cfg = CshipConfig {
+            usage_limits: Some(UsageLimitsConfig {
+                critical_threshold: Some(80.0),
+                critical_style: Some("bold red".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let styled = apply_threshold("X", &data, &cfg);
+        // Critical style should have wrapped the content with ANSI escapes.
+        assert_ne!(styled, "X", "expected critical styling to apply");
+        assert!(styled.contains('\x1b'), "expected ANSI escape; got {styled:?}");
+    }
+
+    #[test]
+    fn test_apply_threshold_prefers_standard_when_present() {
+        use crate::config::CshipConfig;
+        let data = UsageLimitsData {
+            five_hour_pct: 30.0,
+            extra_usage_utilization: Some(90.0),
+            ..Default::default()
+        };
+        let cfg = CshipConfig {
+            usage_limits: Some(UsageLimitsConfig {
+                critical_threshold: Some(80.0),
+                critical_style: Some("bold red".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let styled = apply_threshold("X", &data, &cfg);
+        // Standard pct (30%) is below threshold; extra_usage (90%) is ignored.
+        assert_eq!(styled, "X", "expected no styling; standard signal must win");
     }
 
     // ── fetch_with_timeout() tests ────────────────────────────────────────────
