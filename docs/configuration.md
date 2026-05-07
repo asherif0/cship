@@ -436,7 +436,9 @@ through `extra_usage`. cship adapts automatically:
 
 The `extra_usage_format` placeholders behave identically on Pro/Max and
 Enterprise: `{pct}`, `{used}`, `{limit}`, `{remaining_credits}`, `{active}`.
-Values are in whole USD (the API returns dollars, not cents).
+The API reports `used_credits` and `monthly_limit` in cents, and cship divides
+by 100 for display (e.g. `monthly_limit: 30000` renders as `$300.00`). Dollar
+amounts always show two decimal places.
 
 Run `cship explain` if `cship.usage_limits` is empty on an Enterprise plan —
 it will tell you whether the credential is missing, the API call failed, or

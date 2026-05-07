@@ -518,19 +518,21 @@ fn format_extra_usage(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> Option
         .extra_usage_utilization
         .map(|v| format!("{v:.0}"))
         .unwrap_or_else(|| "?".into());
+    // The Anthropic OAuth usage API reports `used_credits` and `monthly_limit`
+    // in cents (smallest currency unit). Divide by 100 for dollar display.
     let eu_used = data
         .extra_usage_used_credits
-        .map(|v| format!("{v:.0}"))
+        .map(|v| format!("{:.2}", v / 100.0))
         .unwrap_or_else(|| "?".into());
     let eu_limit = data
         .extra_usage_monthly_limit
-        .map(|v| format!("{v:.0}"))
+        .map(|v| format!("{:.2}", v / 100.0))
         .unwrap_or_else(|| "?".into());
     let eu_remaining_credits = match (
         data.extra_usage_monthly_limit,
         data.extra_usage_used_credits,
     ) {
-        (Some(limit), Some(used)) => format!("{:.0}", (limit - used).max(0.0)),
+        (Some(limit), Some(used)) => format!("{:.2}", (limit - used).max(0.0) / 100.0),
         _ => "?".into(),
     };
     let active = if data.five_hour_pct >= 100.0 || data.seven_day_pct >= 100.0 {
@@ -1695,8 +1697,8 @@ mod tests {
             "active indicator (⚡) when 5h at 100%: {result:?}"
         );
         assert!(result.contains("31%"), "extra pct in: {result:?}");
-        assert!(result.contains("6195"), "used credits in: {result:?}");
-        assert!(result.contains("20000"), "monthly limit in: {result:?}");
+        assert!(result.contains("61.95"), "used credits in: {result:?}");
+        assert!(result.contains("200.00"), "monthly limit in: {result:?}");
     }
 
     #[test]
@@ -1790,7 +1792,7 @@ mod tests {
         let result = format_output(&data, &cfg);
         assert!(result.contains("EXTRA 31%"), "custom format: {result:?}");
         assert!(
-            result.contains("rem:13805"),
+            result.contains("rem:138.05"),
             "remaining credits: {result:?}"
         );
     }
@@ -2035,7 +2037,7 @@ mod tests {
             ..Default::default()
         };
         let out = format_extra_usage(&data, &cfg).expect("extra_usage should render");
-        assert!(out.contains("rem=13805"), "remaining_credits: {out:?}");
+        assert!(out.contains("rem=138.05"), "remaining_credits: {out:?}");
         assert!(out.contains("pct=31"), "pct still works: {out:?}");
     }
 
@@ -2064,36 +2066,40 @@ mod tests {
     }
 
     #[test]
-    fn test_format_extra_usage_renders_whole_units() {
-        // Regression: API values are dollars, not cents. Default format must show
-        // $19411 / $20000, not $194 / $200.
+    fn test_format_extra_usage_renders_dollars_from_cents() {
+        // The Anthropic OAuth usage API reports `used_credits` and
+        // `monthly_limit` in cents. Verified against a real Claude Enterprise
+        // response: monthly_limit=30000 cents = $300.00, used=23076 cents =
+        // $230.76. The default format must render those as $230.76 / $300.00.
         let data = UsageLimitsData {
             extra_usage_enabled: Some(true),
-            extra_usage_monthly_limit: Some(20000.0),
-            extra_usage_used_credits: Some(19411.0),
-            extra_usage_utilization: Some(97.055),
+            extra_usage_monthly_limit: Some(30000.0),
+            extra_usage_used_credits: Some(23076.0),
+            extra_usage_utilization: Some(76.92),
             ..Default::default()
         };
         let cfg = UsageLimitsConfig::default();
         let out = format_extra_usage(&data, &cfg).expect("extra_usage enabled => Some");
+        assert!(out.contains("230.76"), "expected $230.76 in output: {out}");
+        assert!(out.contains("300.00"), "expected $300.00 in output: {out}");
         assert!(
-            out.contains("19411"),
-            "expected $19411 in output, got: {out}"
+            !out.contains("23076"),
+            "raw cents must not appear in output: {out}"
         );
         assert!(
-            out.contains("20000"),
-            "expected $20000 in output, got: {out}"
+            !out.contains("30000"),
+            "raw cents must not appear in output: {out}"
         );
-        assert!(!out.contains("$194 "), "must not divide by 100; got: {out}");
     }
 
     #[test]
-    fn test_format_extra_usage_remaining_credits_whole_units() {
+    fn test_format_extra_usage_remaining_credits_dollars_from_cents() {
+        // monthly_limit=30000c, used=23076c → remaining=6924c → $69.24
         let data = UsageLimitsData {
             extra_usage_enabled: Some(true),
-            extra_usage_monthly_limit: Some(20000.0),
-            extra_usage_used_credits: Some(19411.0),
-            extra_usage_utilization: Some(97.055),
+            extra_usage_monthly_limit: Some(30000.0),
+            extra_usage_used_credits: Some(23076.0),
+            extra_usage_utilization: Some(76.92),
             ..Default::default()
         };
         let cfg = UsageLimitsConfig {
@@ -2101,7 +2107,7 @@ mod tests {
             ..Default::default()
         };
         let out = format_extra_usage(&data, &cfg).expect("extra_usage enabled => Some");
-        assert_eq!(out, "rem $589");
+        assert_eq!(out, "rem $69.24");
     }
 
     #[test]
@@ -2203,11 +2209,13 @@ mod tests {
         let transcript_path = tmp.path().join("transcript.jsonl");
         std::fs::write(&transcript_path, "").unwrap();
 
+        // Sourced from a real Claude Enterprise OAuth response —
+        // monthly_limit and used_credits are in cents.
         let data = UsageLimitsData {
             extra_usage_enabled: Some(true),
-            extra_usage_monthly_limit: Some(20000.0),
-            extra_usage_used_credits: Some(19411.0),
-            extra_usage_utilization: Some(97.055),
+            extra_usage_monthly_limit: Some(30000.0),
+            extra_usage_used_credits: Some(23076.0),
+            extra_usage_utilization: Some(76.92),
             ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript_path, &data, 600);
@@ -2220,8 +2228,8 @@ mod tests {
         let out = render(&ctx, &cfg).expect("Enterprise: extra_usage_only must render");
         assert!(!out.contains("5h:"), "must not include 5h section: {out}");
         assert!(!out.contains("7d:"), "must not include 7d section: {out}");
-        assert!(out.contains("19411"), "must include used credits: {out}");
-        assert!(out.contains("20000"), "must include limit: {out}");
+        assert!(out.contains("230.76"), "must include used dollars: {out}");
+        assert!(out.contains("300.00"), "must include limit dollars: {out}");
     }
 
     #[test]

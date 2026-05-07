@@ -14,10 +14,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   enabled" from "OAuth fetch failed", with a more accurate hint message.
 
 ### Fixed
-- `format_extra_usage` no longer divides `used_credits` and `monthly_limit`
-  by 100. The Anthropic OAuth usage API returns whole-dollar values; the
-  divisor caused outputs to be 100× too small. Users with custom
-  `extra_usage_format` strings see corrected magnitudes.
 - `parse_api_response` no longer rejects responses where `five_hour` or
   `seven_day` are `null` (Enterprise shape). The previous deserializer
   required both to be objects, causing the entire fetch to fail.
