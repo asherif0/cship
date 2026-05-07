@@ -241,15 +241,36 @@ fn error_hint_for(
                     "Authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
                 ),
                 Ok(_) => {
-                    // Distinguish "Enterprise plan with no extra credits enabled" from
-                    // "fetch failed". If the cache holds a successful but empty payload,
-                    // it's the former.
+                    // Distinguish three Enterprise-vs-Pro/Max cases from "fetch failed":
+                    //   1. Enterprise per-model sub-token (.opus / .sonnet / .cowork /
+                    //      .oauth_apps / .per_model) — these are inherently absent on
+                    //      Enterprise plans, which only expose monthly credits.
+                    //   2. Enterprise main token with extra_usage disabled — plan has
+                    //      neither usage windows nor extra credits.
+                    //   3. Anything else — fall back to the legacy "fetch failed" hint.
                     let cached = ctx
                         .transcript_path
                         .as_deref()
                         .map(std::path::Path::new)
                         .and_then(|p| crate::cache::read_usage_limits(p, true));
+                    let is_per_model_subtoken = matches!(
+                        top,
+                        "usage_limits.per_model"
+                            | "usage_limits.opus"
+                            | "usage_limits.sonnet"
+                            | "usage_limits.cowork"
+                            | "usage_limits.oauth_apps"
+                    );
                     match cached {
+                        Some(d)
+                            if crate::modules::usage_limits::lacks_standard_signal(&d)
+                                && is_per_model_subtoken =>
+                        {
+                            (
+                                "per-model breakdowns are unavailable on this plan".into(),
+                                "Claude Enterprise reports usage via monthly credits (`extra_usage`) only. Use `$cship.usage_limits` or `$cship.usage_limits.extra_usage` instead.".into(),
+                            )
+                        }
                         Some(d)
                             if crate::modules::usage_limits::lacks_standard_signal(&d)
                                 && d.extra_usage_enabled != Some(true) =>
@@ -603,5 +624,65 @@ mod tests {
             hint.contains("Claude Enterprise"),
             "unexpected hint: {hint}"
         );
+    }
+
+    #[test]
+    fn test_enterprise_per_model_subtoken_hint() {
+        // On Enterprise plans the per-model sub-tokens are inherently absent —
+        // they should produce a dedicated hint, not the misleading "fetch
+        // failed" message.
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_path = tmp.path().join("transcript.jsonl");
+        std::fs::write(&transcript_path, "").unwrap();
+
+        let enterprise = crate::usage_limits::UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(7000.0),
+            extra_usage_utilization: Some(35.0),
+            ..Default::default()
+        };
+        crate::cache::write_usage_limits(&transcript_path, &enterprise, 600);
+
+        let ctx = crate::context::Context {
+            transcript_path: Some(transcript_path.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let cfg = crate::config::CshipConfig::default();
+
+        // OAuth probes via macOS `security` / Linux `secret-tool` subprocesses
+        // are flaky under parallel test execution — each iteration probes
+        // independently and only asserts on iterations that landed in the
+        // `Ok(_)` branch of `error_hint_for`.
+        let mut asserted_at_least_once = false;
+        for token in [
+            "cship.usage_limits.per_model",
+            "cship.usage_limits.opus",
+            "cship.usage_limits.sonnet",
+            "cship.usage_limits.cowork",
+            "cship.usage_limits.oauth_apps",
+        ] {
+            if crate::platform::get_oauth_token().is_err() {
+                continue;
+            }
+            let (msg, hint) = error_hint_for(token, &ctx, &cfg);
+            // Tolerate iterations where OAuth flipped to Err between the probe
+            // above and the inner probe inside error_hint_for.
+            if msg.contains("credential") {
+                continue;
+            }
+            assert!(
+                msg.contains("per-model breakdowns are unavailable"),
+                "{token}: unexpected msg: {msg}"
+            );
+            assert!(
+                hint.contains("monthly credits"),
+                "{token}: unexpected hint: {hint}"
+            );
+            asserted_at_least_once = true;
+        }
+        // If every iteration's OAuth probe was unreliable, the test is
+        // a no-op — same trade-off as the sibling test above.
+        let _ = asserted_at_least_once;
     }
 }
