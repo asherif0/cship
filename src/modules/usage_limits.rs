@@ -136,6 +136,20 @@ fn fetch_and_cache(
     }
 }
 
+/// True when the response carries no 5h or 7d signal — i.e. percentages and
+/// reset markers are all at their `Default` zero state. On Claude Enterprise
+/// the API returns these fields as `null`, so they remain at default values
+/// after `parse_api_response`. Used to switch the renderer into "extra-usage
+/// only" mode.
+pub(crate) fn lacks_standard_signal(data: &UsageLimitsData) -> bool {
+    data.five_hour_pct == 0.0
+        && data.seven_day_pct == 0.0
+        && data.five_hour_resets_at_epoch.is_none()
+        && data.seven_day_resets_at_epoch.is_none()
+        && data.five_hour_resets_at.is_empty()
+        && data.seven_day_resets_at.is_empty()
+}
+
 /// Apply threshold styling using the higher of 5h/7d utilization.
 fn apply_threshold(content: &str, data: &UsageLimitsData, cfg: &CshipConfig) -> String {
     let ul_cfg = cfg.usage_limits.as_ref();
@@ -649,6 +663,41 @@ mod tests {
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
             ..Default::default()
         }
+    }
+
+    // ── lacks_standard_signal() tests ────────────────────────────────────────
+
+    #[test]
+    fn test_lacks_standard_signal_returns_true_for_default() {
+        let data = UsageLimitsData::default();
+        assert!(lacks_standard_signal(&data));
+    }
+
+    #[test]
+    fn test_lacks_standard_signal_returns_false_when_pct_set() {
+        let data = UsageLimitsData {
+            five_hour_pct: 1.0,
+            ..Default::default()
+        };
+        assert!(!lacks_standard_signal(&data));
+    }
+
+    #[test]
+    fn test_lacks_standard_signal_returns_false_when_reset_iso_set() {
+        let data = UsageLimitsData {
+            seven_day_resets_at: "2099-01-01T00:00:00+00:00".into(),
+            ..Default::default()
+        };
+        assert!(!lacks_standard_signal(&data));
+    }
+
+    #[test]
+    fn test_lacks_standard_signal_returns_false_when_reset_epoch_set() {
+        let data = UsageLimitsData {
+            five_hour_resets_at_epoch: Some(1_700_000_000),
+            ..Default::default()
+        };
+        assert!(!lacks_standard_signal(&data));
     }
 
     // ── render() tests ────────────────────────────────────────────────────────
