@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-10
+
+### Added
+- Added per-family `haiku_style`, `sonnet_style`, and `opus_style` fields to `cship.model`, so each Claude family can be coloured independently while still falling back to `style` when a family field is unset ([@aerickson](https://github.com/aerickson), [#172](https://github.com/stephenleo/cship/pull/172))
+- Added Claude Enterprise support to `cship.usage_limits`: when the OAuth API returns no 5h/7d signal, `cship` now renders the `extra_usage` section on its own and falls back to `extra_usage_utilization` for `warn_threshold` / `critical_threshold` evaluation ([@jessedobbelaere](https://github.com/jessedobbelaere), [#174](https://github.com/stephenleo/cship/pull/174))
+- `cship explain` now distinguishes Enterprise-without-credits from a fetch failure, and prints a dedicated hint for per-model sub-tokens on Enterprise ([@jessedobbelaere](https://github.com/jessedobbelaere), [#174](https://github.com/stephenleo/cship/pull/174))
+
+### Fixed
+- `cship.usage_limits` no longer crashes when the OAuth API returns `null` for `five_hour` or `seven_day` (the shape Enterprise accounts return) ([@jessedobbelaere](https://github.com/jessedobbelaere), [#174](https://github.com/stephenleo/cship/pull/174))
+- `extra_usage` amounts now render in whole units, and `{active}` resolves correctly on Enterprise ([@jessedobbelaere](https://github.com/jessedobbelaere), [#174](https://github.com/stephenleo/cship/pull/174))
+
+### Changed
+- Updated all GitHub Actions to their latest majors (Node 24) ([#175](https://github.com/stephenleo/cship/pull/175))
+
+### Docs
+- Documented Claude Enterprise behaviour for `usage_limits` in the configuration guide and FAQ ([#174](https://github.com/stephenleo/cship/pull/174))
+
 ## [1.6.0] - 2026-05-03
 
 ### Added
