@@ -136,13 +136,34 @@ fn fetch_and_cache(
     }
 }
 
+/// True when the response carries no 5h or 7d signal — i.e. percentages and
+/// reset markers are all at their `Default` zero state. On Claude Enterprise
+/// the API returns these fields as `null`, so they remain at default values
+/// after `parse_api_response`. Used to switch the renderer into "extra-usage
+/// only" mode.
+pub(crate) fn lacks_standard_signal(data: &UsageLimitsData) -> bool {
+    data.five_hour_pct == 0.0
+        && data.seven_day_pct == 0.0
+        && data.five_hour_resets_at_epoch.is_none()
+        && data.seven_day_resets_at_epoch.is_none()
+        && data.five_hour_resets_at.is_empty()
+        && data.seven_day_resets_at.is_empty()
+}
+
 /// Apply threshold styling using the higher of 5h/7d utilization.
+/// Falls back to `extra_usage_utilization` when both standard signals are zero
+/// (Enterprise plans where 5h/7d data is absent).
 fn apply_threshold(content: &str, data: &UsageLimitsData, cfg: &CshipConfig) -> String {
     let ul_cfg = cfg.usage_limits.as_ref();
-    let max_pct = data.five_hour_pct.max(data.seven_day_pct);
+    let standard_max = data.five_hour_pct.max(data.seven_day_pct);
+    let pct = if standard_max > 0.0 {
+        standard_max
+    } else {
+        data.extra_usage_utilization.unwrap_or(0.0)
+    };
     crate::ansi::apply_style_with_threshold(
         content,
-        Some(max_pct),
+        Some(pct),
         ul_cfg.and_then(|c| c.style.as_deref()),
         ul_cfg.and_then(|c| c.warn_threshold),
         ul_cfg.and_then(|c| c.warn_style.as_deref()),
@@ -151,12 +172,21 @@ fn apply_threshold(content: &str, data: &UsageLimitsData, cfg: &CshipConfig) -> 
     )
 }
 
-/// Render the usage limits module (5h + 7d + per-model + extra usage combined).
+/// Render the usage limits module.
+///
+/// On Pro/Max plans this is the full 5h + 7d (+ optional per-model + optional extra)
+/// composition produced by `format_output`. On Enterprise plans (where the API returns
+/// 5h/7d as null), `render` short-circuits to the `extra_usage` section only.
 pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
     let data = resolve_data(ctx, cfg)?;
     let default_ul_cfg = UsageLimitsConfig::default();
     let ul_cfg = cfg.usage_limits.as_ref().unwrap_or(&default_ul_cfg);
-    let content = format_output(&data, ul_cfg);
+
+    let content = if lacks_standard_signal(&data) {
+        format_extra_usage(&data, ul_cfg)?
+    } else {
+        format_output(&data, ul_cfg)
+    };
     Some(apply_threshold(&content, &data, cfg))
 }
 
@@ -475,23 +505,28 @@ fn model_entries<'a>(
 
 /// Format the extra usage section. Returns `None` when extra usage is absent or disabled.
 ///
-/// The `{active}` placeholder renders `"⚡"` when either 5h or 7d utilization is at 100%
-/// (meaning requests are currently consuming extra credits), or `"💤"` otherwise.
+/// `{active}` glyph rules:
+/// - Pro/Max: `⚡` when either 5h or 7d utilization is at 100%, else `💤`.
+/// - Enterprise (no 5h/7d signal): `⚡` once `extra_usage_utilization` exceeds
+///   `warn_threshold`, or for any non-zero utilization when no threshold is
+///   configured. Otherwise `💤`.
 fn format_extra_usage(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> Option<String> {
     if data.extra_usage_enabled != Some(true) {
         return None;
     }
     let eu_pct = data
         .extra_usage_utilization
-        .map(|v| format!("{:.0}", v))
+        .map(|v| format!("{v:.0}"))
         .unwrap_or_else(|| "?".into());
+    // The Anthropic OAuth usage API reports `used_credits` and `monthly_limit`
+    // in cents (smallest currency unit). Divide by 100 for dollar display.
     let eu_used = data
         .extra_usage_used_credits
         .map(|v| format!("{:.2}", v / 100.0))
         .unwrap_or_else(|| "?".into());
     let eu_limit = data
         .extra_usage_monthly_limit
-        .map(|v| format!("{:.0}", v / 100.0))
+        .map(|v| format!("{:.2}", v / 100.0))
         .unwrap_or_else(|| "?".into());
     let eu_remaining_credits = match (
         data.extra_usage_monthly_limit,
@@ -502,6 +537,12 @@ fn format_extra_usage(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> Option
     };
     let active = if data.five_hour_pct >= 100.0 || data.seven_day_pct >= 100.0 {
         "\u{26a1}" // ⚡
+    } else if lacks_standard_signal(data) {
+        let threshold = cfg.warn_threshold.unwrap_or(0.0);
+        match data.extra_usage_utilization {
+            Some(u) if u > threshold => "\u{26a1}", // ⚡
+            _ => "\u{1f4a4}",                       // 💤
+        }
     } else {
         "\u{1f4a4}" // 💤
     };
@@ -651,6 +692,41 @@ mod tests {
         }
     }
 
+    // ── lacks_standard_signal() tests ────────────────────────────────────────
+
+    #[test]
+    fn test_lacks_standard_signal_returns_true_for_default() {
+        let data = UsageLimitsData::default();
+        assert!(lacks_standard_signal(&data));
+    }
+
+    #[test]
+    fn test_lacks_standard_signal_returns_false_when_pct_set() {
+        let data = UsageLimitsData {
+            five_hour_pct: 1.0,
+            ..Default::default()
+        };
+        assert!(!lacks_standard_signal(&data));
+    }
+
+    #[test]
+    fn test_lacks_standard_signal_returns_false_when_reset_iso_set() {
+        let data = UsageLimitsData {
+            seven_day_resets_at: "2099-01-01T00:00:00+00:00".into(),
+            ..Default::default()
+        };
+        assert!(!lacks_standard_signal(&data));
+    }
+
+    #[test]
+    fn test_lacks_standard_signal_returns_false_when_reset_epoch_set() {
+        let data = UsageLimitsData {
+            five_hour_resets_at_epoch: Some(1_700_000_000),
+            ..Default::default()
+        };
+        assert!(!lacks_standard_signal(&data));
+    }
+
     // ── render() tests ────────────────────────────────────────────────────────
 
     #[test]
@@ -793,6 +869,53 @@ mod tests {
             result.contains('\x1b'),
             "expected ANSI codes for critical: {result:?}"
         );
+    }
+
+    // ── apply_threshold() extra_usage fallback tests ─────────────────────────
+
+    #[test]
+    fn test_apply_threshold_uses_extra_usage_when_standard_absent() {
+        use crate::config::CshipConfig;
+        let data = UsageLimitsData {
+            extra_usage_utilization: Some(85.0),
+            ..Default::default()
+        };
+        let cfg = CshipConfig {
+            usage_limits: Some(UsageLimitsConfig {
+                critical_threshold: Some(80.0),
+                critical_style: Some("bold red".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let styled = apply_threshold("X", &data, &cfg);
+        // Critical style should have wrapped the content with ANSI escapes.
+        assert_ne!(styled, "X", "expected critical styling to apply");
+        assert!(
+            styled.contains('\x1b'),
+            "expected ANSI escape; got {styled:?}"
+        );
+    }
+
+    #[test]
+    fn test_apply_threshold_prefers_standard_when_present() {
+        use crate::config::CshipConfig;
+        let data = UsageLimitsData {
+            five_hour_pct: 30.0,
+            extra_usage_utilization: Some(90.0),
+            ..Default::default()
+        };
+        let cfg = CshipConfig {
+            usage_limits: Some(UsageLimitsConfig {
+                critical_threshold: Some(80.0),
+                critical_style: Some("bold red".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let styled = apply_threshold("X", &data, &cfg);
+        // Standard pct (30%) is below threshold; extra_usage (90%) is ignored.
+        assert_eq!(styled, "X", "expected no styling; standard signal must win");
     }
 
     // ── fetch_with_timeout() tests ────────────────────────────────────────────
@@ -1575,7 +1698,7 @@ mod tests {
         );
         assert!(result.contains("31%"), "extra pct in: {result:?}");
         assert!(result.contains("61.95"), "used credits in: {result:?}");
-        assert!(result.contains("200"), "monthly limit in: {result:?}");
+        assert!(result.contains("200.00"), "monthly limit in: {result:?}");
     }
 
     #[test]
@@ -1943,6 +2066,130 @@ mod tests {
     }
 
     #[test]
+    fn test_format_extra_usage_renders_dollars_from_cents() {
+        // The Anthropic OAuth usage API reports `used_credits` and
+        // `monthly_limit` in cents. Verified against a real Claude Enterprise
+        // response: monthly_limit=30000 cents = $300.00, used=23076 cents =
+        // $230.76. The default format must render those as $230.76 / $300.00.
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(30000.0),
+            extra_usage_used_credits: Some(23076.0),
+            extra_usage_utilization: Some(76.92),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig::default();
+        let out = format_extra_usage(&data, &cfg).expect("extra_usage enabled => Some");
+        assert!(out.contains("230.76"), "expected $230.76 in output: {out}");
+        assert!(out.contains("300.00"), "expected $300.00 in output: {out}");
+        assert!(
+            !out.contains("23076"),
+            "raw cents must not appear in output: {out}"
+        );
+        assert!(
+            !out.contains("30000"),
+            "raw cents must not appear in output: {out}"
+        );
+    }
+
+    #[test]
+    fn test_format_extra_usage_remaining_credits_dollars_from_cents() {
+        // monthly_limit=30000c, used=23076c → remaining=6924c → $69.24
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(30000.0),
+            extra_usage_used_credits: Some(23076.0),
+            extra_usage_utilization: Some(76.92),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            extra_usage_format: Some("rem ${remaining_credits}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("extra_usage enabled => Some");
+        assert_eq!(out, "rem $69.24");
+    }
+
+    #[test]
+    fn test_active_glyph_on_enterprise_above_warn() {
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(17000.0),
+            extra_usage_utilization: Some(85.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            warn_threshold: Some(80.0),
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(
+            out, "\u{26a1}", /* ⚡ */
+            "above warn => lightning bolt"
+        );
+    }
+
+    #[test]
+    fn test_active_glyph_on_enterprise_below_warn() {
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(10000.0),
+            extra_usage_utilization: Some(50.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            warn_threshold: Some(80.0),
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(
+            out, "\u{1f4a4}", /* 💤 */
+            "below warn => sleep emoji"
+        );
+    }
+
+    #[test]
+    fn test_active_glyph_on_enterprise_no_threshold_any_usage() {
+        // No warn_threshold configured — ANY non-zero utilization shows ⚡.
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_utilization: Some(0.1),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(20.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(out, "\u{26a1}" /* ⚡ */);
+    }
+
+    #[test]
+    fn test_active_glyph_pro_max_unchanged_at_5h_full() {
+        // Pre-existing semantic: ⚡ when 5h or 7d at 100%, regardless of extra_usage.
+        let data = UsageLimitsData {
+            five_hour_pct: 100.0,
+            extra_usage_enabled: Some(true),
+            extra_usage_utilization: Some(0.0),
+            extra_usage_monthly_limit: Some(20000.0),
+            extra_usage_used_credits: Some(0.0),
+            ..Default::default()
+        };
+        let cfg = UsageLimitsConfig {
+            extra_usage_format: Some("{active}".into()),
+            ..Default::default()
+        };
+        let out = format_extra_usage(&data, &cfg).expect("Some");
+        assert_eq!(out, "\u{26a1}" /* ⚡ */);
+    }
+
+    #[test]
     fn test_format_output_no_dangling_separators() {
         let data = UsageLimitsData {
             five_hour_pct: 50.0,
@@ -1960,5 +2207,54 @@ mod tests {
         let result = format_output(&data, &cfg);
         assert_eq!(result, "50% | 30%", "no trailing separator: {result:?}");
         assert!(!result.ends_with(" | "), "no dangling sep: {result:?}");
+    }
+
+    #[test]
+    fn test_render_enterprise_extra_usage_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_path = tmp.path().join("transcript.jsonl");
+        std::fs::write(&transcript_path, "").unwrap();
+
+        // Sourced from a real Claude Enterprise OAuth response —
+        // monthly_limit and used_credits are in cents.
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(true),
+            extra_usage_monthly_limit: Some(30000.0),
+            extra_usage_used_credits: Some(23076.0),
+            extra_usage_utilization: Some(76.92),
+            ..Default::default()
+        };
+        crate::cache::write_usage_limits(&transcript_path, &data, 600);
+
+        let ctx = Context {
+            transcript_path: Some(transcript_path.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let cfg = CshipConfig::default();
+        let out = render(&ctx, &cfg).expect("Enterprise: extra_usage_only must render");
+        assert!(!out.contains("5h:"), "must not include 5h section: {out}");
+        assert!(!out.contains("7d:"), "must not include 7d section: {out}");
+        assert!(out.contains("230.76"), "must include used dollars: {out}");
+        assert!(out.contains("300.00"), "must include limit dollars: {out}");
+    }
+
+    #[test]
+    fn test_render_enterprise_extra_disabled_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_path = tmp.path().join("transcript.jsonl");
+        std::fs::write(&transcript_path, "").unwrap();
+
+        let data = UsageLimitsData {
+            extra_usage_enabled: Some(false),
+            ..Default::default()
+        };
+        crate::cache::write_usage_limits(&transcript_path, &data, 600);
+
+        let ctx = Context {
+            transcript_path: Some(transcript_path.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let cfg = CshipConfig::default();
+        assert!(render(&ctx, &cfg).is_none());
     }
 }

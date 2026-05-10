@@ -430,6 +430,15 @@ separator        = ""
 
 Setting both formats to `""` effectively hides the combined token. Per-model sections render only when the API returns data for that model, so they disappear automatically on accounts that don't expose a given breakdown.
 
+### Claude Enterprise plans
+
+On Enterprise, the OAuth usage API only populates `extra_usage` (the standard
+5h/7d fields are `null`). `cship.usage_limits` automatically renders just the
+`extra_usage` line, and threshold styling falls back to `extra_usage_utilization`.
+
+If `cship.usage_limits` is empty on Enterprise, run `cship explain` for
+specific diagnostics.
+
 ---
 
 ## `[cship.peak_usage]` — Peak-Time Indicator
