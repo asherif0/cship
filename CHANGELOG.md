@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-05-12
+
+### Changed
+- Updated crate description, README hero tagline, and docs site hero to a single shared line: "A beautiful, fully customizable statusline for Claude Code — Starship-style TOML config, themeable colours, Nerd Font glyphs, and tunable cost/context/usage thresholds."
+
+### Fixed
+- `cship.context_bar` now renders with a space between the bar and the percentage for better readability ([@ikhurramraza](https://github.com/ikhurramraza), [#179](https://github.com/stephenleo/cship/pull/179))
+
+### Docs
+- Restructured the README and docs showcase: centered the README title/badges/tagline/hero image, dropped the redundant "Full Starship Prompt" example, folded its content into the Hero showcase, and labelled the example with both `~/.config/cship.toml` and a trimmed `~/.config/starship.toml` (Catppuccin Powerline preset)
+- Refreshed example screenshots
+
 ## [1.7.0] - 2026-05-10
 
 ### Added
