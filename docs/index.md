@@ -4,7 +4,6 @@ layout: home
 hero:
   name: "⚓ CShip"
   text: "A beautiful, fully customizable statusline for Claude Code"
-  tagline: Starship-style TOML config, themeable colours, Nerd Font glyphs, and tunable cost/context/usage thresholds.
   actions:
     - theme: brand
       text: Get Started
