@@ -47,11 +47,8 @@ critical_style     = "bold fg:#f7768e"
 [cship.usage_limits]
 five_hour_format   = " 5h {pct}% ({reset})"
 seven_day_format   = " 7d {pct}% ({reset})"
-sonnet_format      = "🎼 {pct}% ({reset})"
-extra_usage_format = "{active} {pct}% (${used}/${limit})"
 separator          = " "
-show_per_model     = true
-warn_threshold     = 60.0
+warn_threshold     = 50.0
 warn_style         = "fg:#e0af68"
 critical_threshold = 80.0
 critical_style     = "bold fg:#f7768e"
