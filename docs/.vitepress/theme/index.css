@@ -24,16 +24,10 @@
   justify-content: center;
 }
 
-.VPHero .text {
-  font-size: 28px;
-  line-height: 36px;
+.VPHero .tagline {
+  margin: 0 auto;
 }
 
 .VPHero .actions {
   justify-content: center;
-}
-
-.VPHero .tagline {
-  margin: 0 auto;
-  font-style: italic;
 }
