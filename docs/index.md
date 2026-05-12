@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "⚓ CShip"
-  text: "A beautiful, fully customizable statusline for Claude Code"
+  tagline: "A beautiful, fully customizable statusline for Claude Code"
   actions:
     - theme: brand
       text: Get Started
