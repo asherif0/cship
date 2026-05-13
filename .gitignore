@@ -10,3 +10,4 @@ install_private.sh
 .DS_Store
 marketing/
 skills-lock.json
+.playwright-mcp/
