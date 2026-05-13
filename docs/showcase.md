@@ -9,7 +9,7 @@ Ready-to-use `cship.toml` configurations — from the recommended full-featured 
 
 My personal setup, end to end. Top row: `$starship_prompt` running Starship's [Catppuccin Powerline preset](https://starship.rs/presets/catppuccin-powerline). Bottom row: model, cost, context bar, 7-day per-model usage, extra credits, peak-hours indicator — thresholds escalate cool → warn → critical as budgets fill.
 
-![Hero cship statusline](./examples/hero.gif)
+![Hero cship statusline](./examples/01.png)
 
 **`~/.config/cship.toml`**
 
@@ -21,11 +21,11 @@ lines = [
 ]
 
 [cship.model]
-symbol = " "
+symbol = " "
 style  = "bold cyan"
 
 [cship.context_bar]
-symbol             = " "
+symbol             = " "
 filled_char        = "●"
 empty_char         = "○"
 format             = "[$symbol$value]($style)"
