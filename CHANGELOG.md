@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** `$cship.cost.total_duration_ms` and `$cship.cost.total_api_duration_ms` now render human-readable durations (`45s`, `1m30s`, `2h15m30s`, or `750ms` for sub-second values) instead of raw milliseconds. If your config has `format = "[$value ms]($style)"`, drop the literal ` ms` — `$value` is no longer in milliseconds. Threshold configs (`warn_threshold = 30000.0`) keep working unchanged because comparisons still operate on raw milliseconds (issue #162).
+
 ### Added
+- `$cship.cost.total_duration` and `$cship.cost.total_api_duration` are accepted aliases for the `_ms` versions, in both format-string variables and TOML config keys. Use whichever spelling reads better in your config — they resolve to the same field (issue #162).
 - `cship.account` module for displaying the currently authenticated Anthropic account (work vs personal) — sources organization and account info from the `/api/oauth/profile` endpoint, with opt-in label mapping so org names can be replaced with user-defined labels (e.g. `"Fulcrum Genomics" = "work"`). Supports format string placeholders: `{label}`, `{organization}`, `{display_name}`, `{email}`, `{tier}`, `{type}`. Cached for 24 hours (configurable via `ttl`). ([@nh13](https://github.com/nh13), [#153](https://github.com/stephenleo/cship/pull/153))
 
 ### Fixed
