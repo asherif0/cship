@@ -94,6 +94,14 @@ not enabled on your Enterprise account).
 
 ---
 
+## Why does `$cship.effort` show nothing?
+
+The `effort` module renders the session's reasoning effort level, which Claude Code only sends when the **active model supports the effort parameter**. If you're on a model without effort support, the field is absent and the module renders nothing — switch to a model that supports `/effort` (or run `cship explain` to confirm whether an `effort` value is present in the context).
+
+The value reflects live `/effort` changes, so it updates on the next render after you change it mid-session.
+
+---
+
 ## How do I set up the `cship.account` module, and why is it empty? {#account-setup}
 
 `cship.account` shows which Anthropic account you're signed in to (work vs

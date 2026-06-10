@@ -107,6 +107,7 @@ Everything in the [Claude Code status line documentation](https://code.claude.co
 | `$cship.account` | Authenticated Anthropic account (work/personal); map org names via `labels` |
 | `$cship.peak_usage` | Peak-time indicator (US Pacific business hours) |
 | `$cship.agent` | Sub-agent name |
+| `$cship.effort` | Reasoning effort level (`low`/`medium`/`high`/`xhigh`/`max`) |
 | `$cship.session` | Session identity info |
 | `$cship.workspace` | Workspace/project directory |
 
@@ -134,7 +135,7 @@ Ready-to-use configurations — from the recommended full-featured setup down to
 
 ### 1. ⚓ Hero / Recommended
 
-My personal setup, end to end. Top row: `$starship_prompt` running Starship's [Catppuccin Powerline preset](https://starship.rs/presets/catppuccin-powerline). Bottom row: model, cost, context bar, 7-day per-model usage, extra credits, peak-hours indicator — thresholds escalate cool → warn → critical as budgets fill.
+My personal setup, end to end. Top row: `$starship_prompt` running Starship's [Catppuccin Powerline preset](https://starship.rs/presets/catppuccin-powerline). Bottom row: model, effort, cost, context bar, 7-day per-model usage, extra credits, peak-hours indicator — thresholds escalate cool → warn → critical as budgets fill.
 
 <img src="./docs/examples/01.png" alt="Hero cship statusline example" width="600">
 
@@ -147,12 +148,19 @@ My personal setup, end to end. Top row: `$starship_prompt` running Starship's [C
 [cship]
 lines = [
   "$starship_prompt",
-  "$cship.model $cship.cost $cship.context_bar $cship.usage_limits $cship.peak_usage",
+  "$cship.model $cship.effort $cship.cost $cship.context_bar $cship.usage_limits $cship.peak_usage",
 ]
 
 [cship.model]
 symbol = " "
 style  = "bold cyan"
+
+[cship.effort]
+symbol      = "⚡ "
+style       = "fg:#7dcfff"
+high_style  = "fg:#e0af68"
+xhigh_style = "bold fg:#e0af68"
+max_style   = "bold fg:#f7768e"
 
 [cship.context_bar]
 symbol             = " "
