@@ -182,6 +182,11 @@ fn is_disabled(name: &str, cfg: &crate::config::CshipConfig) -> bool {
             .as_ref()
             .and_then(|m| m.disabled)
             .unwrap_or(false),
+        "account" => cfg
+            .account
+            .as_ref()
+            .and_then(|m| m.disabled)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -252,7 +257,7 @@ fn error_hint_for(
                         .transcript_path
                         .as_deref()
                         .map(std::path::Path::new)
-                        .and_then(|p| crate::cache::read_usage_limits(p, true));
+                        .and_then(|p| crate::cache::read_usage_limits(p, true, None));
                     let is_per_model_subtoken = matches!(
                         top,
                         "usage_limits.per_model"
@@ -316,6 +321,7 @@ fn config_section_for(module_name: &str, cfg: &crate::config::CshipConfig) -> &'
         }
         "workspace" if cfg.workspace.is_some() => "[cship.workspace]",
         "usage_limits" if cfg.usage_limits.is_some() => "[cship.usage_limits]",
+        "account" if cfg.account.is_some() => "[cship.account]",
         _ => "(default)",
     }
 }
@@ -600,7 +606,7 @@ mod tests {
         std::fs::write(&transcript_path, "").unwrap();
 
         let empty = crate::usage_limits::UsageLimitsData::default();
-        crate::cache::write_usage_limits(&transcript_path, &empty, 600);
+        crate::cache::write_usage_limits(&transcript_path, &empty, 600, None);
 
         let ctx = crate::context::Context {
             transcript_path: Some(transcript_path.to_string_lossy().into()),
@@ -642,7 +648,7 @@ mod tests {
             extra_usage_utilization: Some(35.0),
             ..Default::default()
         };
-        crate::cache::write_usage_limits(&transcript_path, &enterprise, 600);
+        crate::cache::write_usage_limits(&transcript_path, &enterprise, 600, None);
 
         let ctx = crate::context::Context {
             transcript_path: Some(transcript_path.to_string_lossy().into()),
