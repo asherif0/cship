@@ -2,12 +2,10 @@
 
 # ⚓ CShip (pronounced "sea ship")
 
-[![CI](https://img.shields.io/github/actions/workflow/status/stephenleo/cship/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/stephenleo/cship/actions/workflows/ci.yml)
-[![Crates.io version](https://img.shields.io/crates/v/cship?style=flat-square)](https://crates.io/crates/cship)
-[![Crates downloads](https://img.shields.io/crates/d/cship?label=crates%20downloads&style=flat-square)](https://crates.io/crates/cship)
-[![GitHub release](https://img.shields.io/github/v/release/stephenleo/cship?style=flat-square)](https://github.com/stephenleo/cship/releases/latest)
-[![GitHub downloads](https://img.shields.io/github/downloads/stephenleo/cship/total?label=github%20downloads&style=flat-square)](https://github.com/stephenleo/cship/releases)
-[![License](https://img.shields.io/github/license/stephenleo/cship?style=flat-square)](https://github.com/stephenleo/cship/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/asherif0/cship/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/asherif0/cship/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/asherif0/cship?style=flat-square)](https://github.com/asherif0/cship/releases/latest)
+[![GitHub downloads](https://img.shields.io/github/downloads/asherif0/cship/total?label=github%20downloads&style=flat-square)](https://github.com/asherif0/cship/releases)
+[![License](https://img.shields.io/github/license/asherif0/cship?style=flat-square)](https://github.com/asherif0/cship/blob/main/LICENSE)
 
 **A beautiful, fully customizable statusline for Claude Code**<br>
 *Starship-style TOML config, themeable colours, Nerd Font glyphs, and tunable cost/context/usage thresholds.*
@@ -26,10 +24,12 @@
 
 ## 🚀 Install
 
+> **This is a fork ([`asherif0/cship`](https://github.com/asherif0/cship)).** The commands below install **this fork**, not upstream. `cargo install --git` (Method 2) builds from source and works right away. The curl / PowerShell installers download prebuilt binaries from this fork's [Releases](https://github.com/asherif0/cship/releases) — if none exist yet, trigger the fork's **Release** workflow once (push a `vX.Y.Z` tag, or *Actions → Release → Run workflow*) so those binaries are published.
+
 ### ⚡ Method 1a: curl installer (macOS / Linux)
 
 ```sh
-curl -fsSL https://cship.dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/asherif0/cship/main/install.sh | bash
 ```
 
 Auto-detects your OS and architecture (macOS arm64/x86_64, Linux x86_64/aarch64), downloads the binary to `~/.local/bin/cship`, creates a starter config at `~/.config/cship.toml`, and wires the `statusLine` entry in `~/.claude/settings.json`.
@@ -39,7 +39,7 @@ Optional dependencies ([Starship](https://starship.rs) for passthrough modules, 
 - **Interactive terminal** — the installer prompts you for each.
 - **`--yes` / `-y`** — auto-installs all optional deps without prompting:
   ```sh
-  curl -fsSL https://cship.dev/install.sh | bash -s -- --yes
+  curl -fsSL https://raw.githubusercontent.com/asherif0/cship/main/install.sh | bash -s -- --yes
   ```
 - **Non-interactive** (Docker `RUN`, CI pipelines, no TTY) — optional deps are skipped automatically; the installer prints instructions for manual installation.
 
@@ -48,19 +48,19 @@ Optional dependencies ([Starship](https://starship.rs) for passthrough modules, 
 Run this one-liner in PowerShell (5.1 or later):
 
 ```powershell
-irm https://cship.dev/install.ps1 | iex
+irm https://raw.githubusercontent.com/asherif0/cship/main/install.ps1 | iex
 ```
 
 Installs to `%USERPROFILE%\.local\bin\cship.exe`, writes config to `%USERPROFILE%\.config\cship.toml`, and registers the statusline in `%USERPROFILE%\.claude\settings.json`.
 
-> You can inspect the script before running: [install.ps1](https://cship.dev/install.ps1)
+> You can inspect the script before running: [install.ps1](https://github.com/asherif0/cship/blob/main/install.ps1)
 
-### 📦 Method 2: cargo install
+### 📦 Method 2: cargo install (from source)
 
-Requires the Rust toolchain.
+Requires the Rust toolchain. Builds this fork straight from source — works even when the fork has no published release yet.
 
 ```sh
-cargo install cship
+cargo install --git https://github.com/asherif0/cship
 ```
 
 After installing with `cargo` on **macOS / Linux**, wire the statusline manually in `~/.claude/settings.json`:
@@ -114,7 +114,7 @@ Everything in the [Claude Code status line documentation](https://code.claude.co
 
 Full configuration reference: **https://cship.dev**
 
-### ⚡ Impact score (`$cship.impact`)
+### 🎯 Impact score (`$cship.impact`)
 
 A deterministic **0–100 score** for how much a coding session is actually
 accomplishing — updated live each turn, right next to your cost and context bar.
@@ -159,7 +159,7 @@ at/below `critical_threshold`.
 lines = ["$cship.model $cship.cost $cship.impact"]
 
 [cship.impact]
-symbol             = "⚡ "
+symbol             = "🎯 "
 style              = "bold green"
 warn_threshold     = 50          # score ≤ 50 → warn colour
 warn_style         = "yellow"
@@ -179,7 +179,7 @@ show_delta         = true        # trailing ▲/▼ vs the previous render
 # cache_ttl_secs = 5
 ```
 
-Renders like: `⚡ 62 ▲+4`.
+Renders like: `🎯 62 ▲+4`.
 
 ## 🔍 Debugging
 
@@ -709,7 +709,7 @@ Complete configuration reference, format string syntax, all module options, and 
 
 ---
 
-If you found this project useful, please give us a star ⭐ on [GitHub](https://github.com/stephenleo/cship)!
+If you found this project useful, please give us a star ⭐ on [GitHub](https://github.com/asherif0/cship)! This is a fork of the excellent [stephenleo/cship](https://github.com/stephenleo/cship) — consider starring upstream too.
 
 If you find bugs or have suggestions, open an issue or submit a pull request. Contributions are very welcome!
 

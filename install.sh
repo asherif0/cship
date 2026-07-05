@@ -53,7 +53,7 @@ if command -v cship >/dev/null 2>&1; then
 fi
 
 # ── 3. Download Binary ────────────────────────────────────────────────────────
-BINARY_URL="https://github.com/stephenleo/cship/releases/latest/download/cship-${TARGET}"
+BINARY_URL="https://github.com/asherif0/cship/releases/latest/download/cship-${TARGET}"
 mkdir -p "$INSTALL_DIR"
 echo "Downloading cship from $BINARY_URL ..."
 curl -fsSL "$BINARY_URL" -o "${INSTALL_DIR}/cship"
