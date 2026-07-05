@@ -13,7 +13,7 @@ param([switch]$Yes)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$REPO    = "stephenleo/cship"
+$REPO    = "asherif0/cship"
 $INSTALL_DIR = Join-Path $env:USERPROFILE ".local\bin"
 $BIN     = Join-Path $INSTALL_DIR "cship.exe"
 $CONFIG_DIR  = Join-Path $env:USERPROFILE ".config"
