@@ -88,13 +88,18 @@ pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
     // Resolve the per-session git baseline + a current raw snapshot. Reuse the
     // cached snapshot while fresh; otherwise recompute via git (preserving the
     // baseline). A new/absent session establishes the baseline as "now".
-    let (base_commits, base_merges, raw, prev_score, recomputed) = match cached {
+    //
+    // `keep_expires_at` carries the stored git TTL forward on a fresh render so
+    // persisting the score every render (below) does not push the git expiry out
+    // and starve the once-per-TTL git reads. It is `None` whenever we recomputed
+    // the snapshot (then the write refreshes the TTL).
+    let (base_commits, base_merges, raw, prev_score, keep_expires_at) = match cached {
         Some(c) if c.session_id == session_id && c.fresh => (
             c.baseline_commit_count,
             c.baseline_merge_count,
             c.raw,
             c.last_score,
-            false,
+            Some(c.expires_at),
         ),
         Some(c) if c.session_id == session_id => {
             let raw = git::read_raw(cwd);
@@ -103,12 +108,12 @@ pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
                 c.baseline_merge_count,
                 raw,
                 c.last_score,
-                true,
+                None,
             )
         }
         _ => {
             let raw = git::read_raw(cwd);
-            (raw.commit_count, raw.merge_count, raw, 0, true)
+            (raw.commit_count, raw.merge_count, raw, 0, None)
         }
     };
 
@@ -118,10 +123,22 @@ pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
 
     let score = compute_score(icfg, cost_usd, commits, merges, code_lines, files);
 
-    // Persist only when we actually recomputed the git snapshot — preserves the
-    // baseline and refreshes the stored score used for the delta arrow.
-    if recomputed && let Some(tp) = transcript {
-        cache::write_impact(tp, session_id, base_commits, base_merges, &raw, score, ttl);
+    // Persist every render so the delta arrow compares against the *previous
+    // render's* score (its documented intent), not the last git recompute — the
+    // token terms move the score between git reads, so a recompute-gated baseline
+    // let the number change with no arrow. Preserve the git TTL on fresh renders
+    // (`keep_expires_at`); refresh it only when the snapshot was recomputed.
+    if let Some(tp) = transcript {
+        cache::write_impact(
+            tp,
+            session_id,
+            base_commits,
+            base_merges,
+            &raw,
+            score,
+            ttl,
+            keep_expires_at,
+        );
     }
 
     Some(format_output(icfg, score, prev_score))

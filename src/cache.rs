@@ -325,6 +325,9 @@ pub struct ImpactCache {
     pub raw: GitRaw,
     pub last_score: u32,
     pub fresh: bool,
+    /// Stored git-snapshot expiry (Unix epoch secs). Exposed so a per-render score
+    /// write can preserve the git TTL instead of pushing it forward every render.
+    pub expires_at: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -360,10 +363,18 @@ pub fn read_impact(transcript_path: &Path) -> Option<ImpactCache> {
         baseline_merge_count: envelope.baseline_merge_count,
         raw: envelope.raw,
         last_score: envelope.last_score,
+        expires_at: envelope.expires_at,
     })
 }
 
-/// Write impact state to the cache file. Sets `expires_at` to now + `ttl_secs`.
+/// Write impact state to the cache file.
+///
+/// `keep_expires_at` controls the git-snapshot TTL: pass `None` when the git raw
+/// snapshot was just recomputed (refreshes expiry to now + `ttl_secs`), or
+/// `Some(expires_at)` to preserve an existing expiry when only `last_score`
+/// changed this render — so persisting the score every render for the delta arrow
+/// does not keep the git TTL alive and starve the once-per-TTL git reads.
+///
 /// Silently no-ops on any I/O error — cache write failure must never surface.
 #[allow(clippy::too_many_arguments)]
 pub fn write_impact(
@@ -374,6 +385,7 @@ pub fn write_impact(
     raw: &GitRaw,
     last_score: u32,
     ttl_secs: u64,
+    keep_expires_at: Option<u64>,
 ) {
     let Some(path) = impact_cache_path(transcript_path) else {
         return;
@@ -387,7 +399,7 @@ pub fn write_impact(
         baseline_merge_count,
         raw: raw.clone(),
         last_score,
-        expires_at: now_epoch() + ttl_secs,
+        expires_at: keep_expires_at.unwrap_or_else(|| now_epoch() + ttl_secs),
     };
     if let Ok(json) = serde_json::to_string(&envelope) {
         let _ = std::fs::write(path, json);
@@ -1018,6 +1030,63 @@ mod tests {
             result.is_none(),
             "fingerprint mismatch should invalidate even with allow_stale"
         );
+        drop(dir);
+    }
+
+    // ── Impact cache tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_impact_roundtrip_exposes_expires_at_and_fresh() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let transcript = dir.path().join("transcript.jsonl");
+        let raw = GitRaw {
+            commit_count: 10,
+            merge_count: 2,
+            churn: 40,
+            files: 3,
+            available: true,
+        };
+        write_impact(&transcript, "sess-1", 5, 1, &raw, 42, 5, None);
+        let cache = read_impact(&transcript).expect("cache hit");
+        assert_eq!(cache.session_id, "sess-1");
+        assert_eq!(cache.baseline_commit_count, 5);
+        assert_eq!(cache.last_score, 42);
+        assert!(cache.fresh, "just-written entry within TTL should be fresh");
+        // None → expiry refreshed to ~now + ttl.
+        let now = now_epoch();
+        assert!(
+            cache.expires_at >= now && cache.expires_at <= now + 6,
+            "expected expires_at ~now+5, got delta={}",
+            cache.expires_at.saturating_sub(now)
+        );
+        drop(dir);
+    }
+
+    #[test]
+    fn test_impact_keep_expires_at_preserves_git_ttl() {
+        // The per-render score write (keep_expires_at = Some) must NOT push the
+        // git-snapshot TTL forward, so a stale snapshot stays stale and git is
+        // re-read on the next recompute.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let transcript = dir.path().join("transcript.jsonl");
+        let raw = GitRaw::default();
+        // First write recomputes git → fresh TTL.
+        write_impact(&transcript, "sess-1", 0, 0, &raw, 10, 5, None);
+        let first = read_impact(&transcript).expect("cache hit");
+        // A frozen expiry in the past simulates a snapshot that has since gone stale.
+        let frozen = now_epoch().saturating_sub(100);
+        write_impact(&transcript, "sess-1", 0, 0, &raw, 20, 5, Some(frozen));
+        let second = read_impact(&transcript).expect("cache hit");
+        assert_eq!(second.last_score, 20, "score updated every render");
+        assert_eq!(
+            second.expires_at, frozen,
+            "preserved expiry must equal the passed value, not now+ttl"
+        );
+        assert!(
+            !second.fresh,
+            "preserving a past expiry keeps the snapshot stale for the next git read"
+        );
+        assert!(first.fresh, "sanity: the recompute write was fresh");
         drop(dir);
     }
 }
