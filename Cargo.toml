@@ -1,10 +1,10 @@
 [package]
 name          = "cship"
-version       = "1.8.0"
+version       = "1.8.1"
 edition       = "2024"
 description   = "A beautiful, fully customizable statusline for Claude Code — Starship-style TOML config, themeable colours, Nerd Font glyphs, and tunable cost/context/usage thresholds"
 license       = "Apache-2.0"
-repository    = "https://github.com/stephenleo/cship"
+repository    = "https://github.com/asherif0/cship"
 homepage      = "https://cship.dev"
 documentation = "https://cship.dev"
 keywords      = ["starship", "claude", "statusline", "terminal"]
