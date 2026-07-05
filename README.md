@@ -101,6 +101,7 @@ Everything in the [Claude Code status line documentation](https://code.claude.co
 | `$cship.context_window.used_tokens` | Real token count in context with percentage (e.g. `8%(79k/1000k)`) |
 | `$cship.cost.total_lines_added` | Lines added this session |
 | `$cship.cost.total_lines_removed` | Lines removed this session |
+| `$cship.impact` | Deterministic 0–100 session impact score (shipped work + token efficiency + breadth). [Details ↓](#-impact-score-cshipimpact) |
 | `$cship.usage_limits` | API usage limits (5hr / 7-day, plus per-model and extra-usage when available) |
 | `$cship.usage_limits.per_model` | 7-day per-model breakdown (opus / sonnet / cowork / oauth) |
 | `$cship.usage_limits.extra_usage` | Extra-credits section with `{active}` indicator |
@@ -112,6 +113,70 @@ Everything in the [Claude Code status line documentation](https://code.claude.co
 | `$cship.workspace` | Workspace/project directory |
 
 Full configuration reference: **https://cship.dev**
+
+### ⚡ Impact score (`$cship.impact`)
+
+A deterministic **0–100 score** for how much a coding session is actually
+accomplishing — updated live each turn, right next to your cost and context bar.
+Unlike an LLM-guessed "vibe" number, every point is reproducible from concrete
+signals:
+
+| Signal | Source | Weight (default) |
+|--------|--------|------------------|
+| Commits shipped this session | local `git` | `commit_weight` (4) |
+| Merges landed this session | local `git` | `merge_weight` (8) |
+| Token efficiency — code churn per `$` | statusline `total_lines_*` + `total_cost_usd` | `efficiency_weight` (1) |
+| Breadth — files touched | local `git` | `breadth_weight` (1) |
+| Anti-thrash — cost burned with nothing to show | `total_cost_usd` | `thrash_penalty` (−3) |
+
+```
+raw   = 4·commits + 8·merges + 1·(churn/$ ÷ 200) + 1·files − 3·thrash
+score = round(100 · raw / (raw + K))          # K = saturation_k (10)
+```
+
+The score **saturates** (via `K`) so it stays in 0–100 and rewards early wins
+more than the 50th commit. Git counts are diffed against a **per-session
+baseline** captured on the session's first render, so the number reflects *this*
+session's work, not the repo's whole history. Git runs at most once per
+`cache_ttl_secs` (default 5s) behind a cache — the token terms refresh every
+turn, so the score reacts live without a `git` call per keystroke. Outside a git
+repo it degrades gracefully to the token-efficiency signal alone.
+
+> `K` and the thresholds ship calibrated against 2404 real git sessions
+> (`scripts/calibrate_impact.py`): the median session scores ~60, the top decile
+> ~86. Re-run that script if you retune the weights.
+
+**Threshold colouring is inverted vs `cost`** — for impact, *higher is better*,
+so `warn_threshold` / `critical_threshold` are treated as *floors*: the score
+escalates to `warn_style` at/below `warn_threshold` and to `critical_style`
+at/below `critical_threshold`.
+
+```toml
+[cship]
+lines = ["$cship.model $cship.cost $cship.impact"]
+
+[cship.impact]
+symbol             = "⚡ "
+style              = "bold green"
+warn_threshold     = 50          # score ≤ 50 → warn colour
+warn_style         = "yellow"
+critical_threshold = 20          # score ≤ 20 → critical colour
+critical_style     = "bold red"
+show_delta         = true        # append a per-turn ▲/▼ delta
+
+# ── optional score tuning (defaults shown) ──
+# commit_weight = 4.0
+# merge_weight = 8.0
+# efficiency_weight = 1.0
+# breadth_weight = 1.0
+# thrash_penalty = 3.0
+# churn_per_dollar_scale = 200.0
+# saturation_k = 10.0
+# thrash_cost_threshold = 0.10
+# cache_ttl_secs = 5
+```
+
+Renders like: `⚡ 62 ▲+4`.
 
 ## 🔍 Debugging
 

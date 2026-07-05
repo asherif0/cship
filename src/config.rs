@@ -23,6 +23,58 @@ pub struct CshipConfig {
     pub peak_usage: Option<PeakUsageConfig>,
     pub starship_prompt: Option<StarshipPromptConfig>,
     pub account: Option<AccountConfig>,
+    pub impact: Option<ImpactConfig>,
+}
+
+/// Configuration for `[cship.impact]` — the deterministic session impact score.
+///
+/// The score is a bounded 0–100 value combining shipped work (commits/merges,
+/// from local git), token efficiency (churn per dollar), activity breadth (files
+/// touched) and an anti-thrash penalty (cost burned with nothing to show). All
+/// weights and the saturation constant are tunable; defaults are documented per
+/// field and generally need one calibration pass against a few real sessions.
+///
+/// NOTE on thresholds: unlike `cost`, **higher is better** for impact, so
+/// `warn_threshold` / `critical_threshold` are treated as *floors* — the score
+/// escalates to `warn_style` when it drops to/below `warn_threshold` and to
+/// `critical_style` at/below `critical_threshold`.
+#[derive(Debug, Deserialize, Default)]
+pub struct ImpactConfig {
+    pub style: Option<String>,
+    pub symbol: Option<String>,
+    pub disabled: Option<bool>,
+    /// When `true`, prepends `impact ` as a label.
+    pub label: Option<bool>,
+    pub format: Option<String>,
+    /// Score at/below which `warn_style` is applied (floor semantics). Default: 50.
+    pub warn_threshold: Option<f64>,
+    pub warn_style: Option<String>,
+    /// Score at/below which `critical_style` is applied (floor semantics). Default: 20.
+    pub critical_threshold: Option<f64>,
+    pub critical_style: Option<String>,
+
+    // ── Score weights (all optional; see defaults in `modules::impact`) ──
+    /// Weight per commit authored this session. Default: 4.0.
+    pub commit_weight: Option<f64>,
+    /// Weight per merge commit landed this session. Default: 8.0.
+    pub merge_weight: Option<f64>,
+    /// Weight on token efficiency (churn per dollar, scaled). Default: 1.0.
+    pub efficiency_weight: Option<f64>,
+    /// Weight per file touched (activity breadth). Default: 1.0.
+    pub breadth_weight: Option<f64>,
+    /// Penalty subtracted when cost is burned with no shipped/changed work. Default: 3.0.
+    pub thrash_penalty: Option<f64>,
+    /// Divisor applied to (churn / cost_usd) before weighting, to keep it O(1). Default: 200.0.
+    pub churn_per_dollar_scale: Option<f64>,
+    /// Saturation constant K in `score = 100·raw/(raw+K)`. Higher K = harder to
+    /// score high. Default: 10.0. **Calibrate this first.**
+    pub saturation_k: Option<f64>,
+    /// Cost (USD) above which a no-output session counts as thrash. Default: 0.10.
+    pub thrash_cost_threshold: Option<f64>,
+    /// TTL in seconds for the cached git snapshot (git runs at most once per TTL). Default: 5.
+    pub cache_ttl_secs: Option<u64>,
+    /// Show a per-update delta arrow (e.g. `▲+4`) next to the score. Default: true.
+    pub show_delta: Option<bool>,
 }
 
 /// Per-module config fields shared by all native CShip modules.
@@ -907,5 +959,89 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(sub.warn_threshold, Some(2000.0));
+    }
+
+    #[test]
+    fn test_impact_full_config_deserializes() {
+        let toml_full = r#"
+            [cship.impact]
+            style = "bold green"
+            symbol = "⚡ "
+            disabled = false
+            label = true
+            format = "[$symbol$value]($style)"
+            warn_threshold = 50.0
+            warn_style = "yellow"
+            critical_threshold = 20.0
+            critical_style = "bold red"
+            commit_weight = 4.0
+            merge_weight = 8.0
+            efficiency_weight = 1.0
+            breadth_weight = 1.0
+            thrash_penalty = 3.0
+            churn_per_dollar_scale = 200.0
+            saturation_k = 10.0
+            thrash_cost_threshold = 0.10
+            cache_ttl_secs = 5
+            show_delta = true
+        "#;
+        let cfg: StarshipToml = toml::from_str(toml_full).unwrap();
+        let impact = cfg.cship.as_ref().unwrap().impact.as_ref().unwrap();
+        assert_eq!(impact.style.as_deref(), Some("bold green"));
+        assert_eq!(impact.symbol.as_deref(), Some("⚡ "));
+        assert_eq!(impact.disabled, Some(false));
+        assert_eq!(impact.label, Some(true));
+        assert_eq!(impact.format.as_deref(), Some("[$symbol$value]($style)"));
+        assert_eq!(impact.warn_threshold, Some(50.0));
+        assert_eq!(impact.warn_style.as_deref(), Some("yellow"));
+        assert_eq!(impact.critical_threshold, Some(20.0));
+        assert_eq!(impact.critical_style.as_deref(), Some("bold red"));
+        assert_eq!(impact.commit_weight, Some(4.0));
+        assert_eq!(impact.merge_weight, Some(8.0));
+        assert_eq!(impact.efficiency_weight, Some(1.0));
+        assert_eq!(impact.breadth_weight, Some(1.0));
+        assert_eq!(impact.thrash_penalty, Some(3.0));
+        assert_eq!(impact.churn_per_dollar_scale, Some(200.0));
+        assert_eq!(impact.saturation_k, Some(10.0));
+        assert_eq!(impact.thrash_cost_threshold, Some(0.10));
+        assert_eq!(impact.cache_ttl_secs, Some(5));
+        assert_eq!(impact.show_delta, Some(true));
+    }
+
+    #[test]
+    fn test_impact_partial_config_leaves_rest_none() {
+        // Only a couple of keys set — everything else must default to None so the
+        // module falls back to its documented defaults.
+        let toml_partial = r#"
+            [cship.impact]
+            saturation_k = 15.0
+            disabled = true
+        "#;
+        let cfg: StarshipToml = toml::from_str(toml_partial).unwrap();
+        let impact = cfg.cship.as_ref().unwrap().impact.as_ref().unwrap();
+        assert_eq!(impact.saturation_k, Some(15.0));
+        assert_eq!(impact.disabled, Some(true));
+        assert!(impact.commit_weight.is_none());
+        assert!(impact.warn_style.is_none());
+        assert!(impact.show_delta.is_none());
+    }
+
+    #[test]
+    fn test_impact_absent_section_is_none() {
+        let cfg: StarshipToml = toml::from_str("[cship.cost]\nstyle = \"green\"\n").unwrap();
+        assert!(cfg.cship.as_ref().unwrap().impact.is_none());
+    }
+
+    #[test]
+    fn test_impact_unknown_field_ignored() {
+        // Forward-compatibility: no deny_unknown_fields, so a future key is skipped.
+        let toml_extra = r#"
+            [cship.impact]
+            saturation_k = 12.0
+            some_future_field = "ignored"
+        "#;
+        let cfg: StarshipToml = toml::from_str(toml_extra).unwrap();
+        let impact = cfg.cship.as_ref().unwrap().impact.as_ref().unwrap();
+        assert_eq!(impact.saturation_k, Some(12.0));
     }
 }

@@ -14,6 +14,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::account::AccountProfile;
+use crate::git::GitRaw;
 use crate::usage_limits::UsageLimitsData;
 
 const PASSTHROUGH_TTL: Duration = Duration::from_secs(5);
@@ -295,6 +296,98 @@ pub fn write_account_profile(
         data: data.clone(),
         expires_at: now_epoch() + ttl_secs,
         token_fingerprint: token_fingerprint.map(String::from),
+    };
+    if let Ok(json) = serde_json::to_string(&envelope) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+// ── Impact git-signal cache (module: cship.impact) ───────────────────────────
+//
+// Persists two things per session so the impact score is both cheap and stable:
+//   1. A per-session **baseline** (commit/merge counts at first sight of the
+//      session) — so "commits this session" = current − baseline. Persisted for
+//      the whole session; only reset when the `session_id` changes.
+//   2. The last raw git **snapshot** + last rendered score, with a short TTL so
+//      `git` subprocesses run at most once per `ttl_secs`, not every render.
+//
+// Baseline data is kept even past the TTL — expiry only means "recompute the
+// snapshot", not "forget the baseline". `read_impact` returns the stored data
+// with a `fresh` flag; the module reuses the snapshot when fresh and recomputes
+// (preserving the baseline) when stale.
+
+/// Cached impact state returned to the module. `fresh == true` means the raw
+/// snapshot is still within its TTL and can be reused without shelling out to git.
+pub struct ImpactCache {
+    pub session_id: String,
+    pub baseline_commit_count: u64,
+    pub baseline_merge_count: u64,
+    pub raw: GitRaw,
+    pub last_score: u32,
+    pub fresh: bool,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ImpactCacheEnvelope {
+    session_id: String,
+    baseline_commit_count: u64,
+    baseline_merge_count: u64,
+    raw: GitRaw,
+    last_score: u32,
+    expires_at: u64,
+}
+
+/// Derive the cache file path for the impact module.
+/// Example: `.../session.jsonl` → `.../cship/session-impact`
+fn impact_cache_path(transcript_path: &Path) -> Option<std::path::PathBuf> {
+    let dir = transcript_path.parent()?;
+    let stem = transcript_path.file_stem()?.to_str()?;
+    Some(dir.join("cship").join(format!("{stem}-impact")))
+}
+
+/// Read the cached impact state, if any. Returns the stored data regardless of
+/// TTL (the baseline must survive expiry); `fresh` reports whether the raw
+/// snapshot is still within its TTL. Returns `None` only on cache miss or a
+/// corrupt/unparseable file.
+pub fn read_impact(transcript_path: &Path) -> Option<ImpactCache> {
+    let path = impact_cache_path(transcript_path)?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let envelope: ImpactCacheEnvelope = serde_json::from_str(&raw).ok()?;
+    Some(ImpactCache {
+        fresh: now_epoch() < envelope.expires_at,
+        session_id: envelope.session_id,
+        baseline_commit_count: envelope.baseline_commit_count,
+        baseline_merge_count: envelope.baseline_merge_count,
+        raw: envelope.raw,
+        last_score: envelope.last_score,
+    })
+}
+
+/// Write impact state to the cache file. Sets `expires_at` to now + `ttl_secs`.
+/// Silently no-ops on any I/O error — cache write failure must never surface.
+#[allow(clippy::too_many_arguments)]
+pub fn write_impact(
+    transcript_path: &Path,
+    session_id: &str,
+    baseline_commit_count: u64,
+    baseline_merge_count: u64,
+    raw: &GitRaw,
+    last_score: u32,
+    ttl_secs: u64,
+) {
+    let Some(path) = impact_cache_path(transcript_path) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let envelope = ImpactCacheEnvelope {
+        session_id: session_id.to_string(),
+        baseline_commit_count,
+        baseline_merge_count,
+        raw: raw.clone(),
+        last_score,
+        expires_at: now_epoch() + ttl_secs,
     };
     if let Ok(json) = serde_json::to_string(&envelope) {
         let _ = std::fs::write(path, json);
