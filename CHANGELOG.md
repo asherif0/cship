@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.1] - 2026-07-05
+
+> Fork release ([asherif0/cship](https://github.com/asherif0/cship)) — first published release of the fork.
+
+### Fixed
+- `cship.impact`: the ▲/▼ delta baseline is now persisted every render instead of only on the git-snapshot TTL boundary, so the arrow tracks the displayed score on the same schedule (the number no longer changes with no arrow).
+
+### Changed
+- `$cship.impact` is now part of the default statusline; `$cship.usage_limits` and `$cship.peak_usage` were removed from the shipped defaults (README recommended config, `install.sh`/`install.ps1` starter configs, and the example `cship.toml`).
+- Impact score section icon changed from ⚡ to 🎯.
+
+### Docs
+- Install steps, installer scripts, and badges now reference the `asherif0/cship` fork rather than upstream. `cargo install --git` builds the fork from source; the curl/PowerShell installers pull binaries from the fork's releases.
+- Clarified the impact-score docs: only commits/merges use the per-session baseline (breadth is the current working tree), and the delta compares against the previous render.
+
 ## [1.8.0] - 2026-06-29
 
 ### Security
