@@ -161,6 +161,14 @@ Set `end_hour = 24` to mean "through end of day". Weekends always return nothing
 
 You can see the current cache state by running `cship explain` — it shows the usage limits value being rendered and any warnings if the API call failed.
 
+## Why did my impact score jump with no delta arrow? {#impact-delta}
+
+The delta marker (`▲+N` / `▼-N`) on `$cship.impact` compares the score against the **previous render's** score, and it only appears on the render where the number actually changes — it is not a sticky badge. So if you glance at the statusline a turn *after* a jump, you'll see the new score with no arrow, because there's no longer any change to mark.
+
+Note also that the git-derived signals (commits, merges, files) are refreshed at most once per `cache_ttl_secs` (default 5s). When that snapshot is recomputed it can absorb, in a single render, all the git activity that accumulated since the last read — so the score can appear to leap "all at once" on whichever turn crosses the TTL boundary, even though the underlying work was spread across earlier turns. The token terms (churn per dollar) refresh every render.
+
+> Earlier versions only updated the stored score on the git-recompute boundary, so the number could change on a render with no arrow. The score is now persisted every render, so the arrow tracks the displayed value on the same schedule.
+
 ## Why are some characters missing from my path or model name?
 
 cship strips terminal control characters (ESC, BEL, the C0/C1 ranges, and DEL — including tab, carriage return, and newline) from untrusted session JSON fields such as `cwd`, `transcript_path`, `model`, and `workspace` before rendering. This is a security measure: it prevents a malicious directory or model name from injecting raw escape sequences that could spoof your terminal title, move the cursor, or write to the clipboard via OSC 52 ([CWE-150](https://cwe.mitre.org/data/definitions/150.html)).
