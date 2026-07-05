@@ -575,3 +575,71 @@ Renders your entire Starship-configured prompt in a single call. Unlike per-modu
 [cship.starship_prompt]
 disabled = false
 ```
+
+---
+
+## `[cship.impact]` — Session Impact Score
+
+A deterministic **0–100 score** for how productive the current session is,
+updated live each turn. Every point is reproducible from concrete signals — no
+LLM guessing:
+
+```
+raw   = commit_weight·commits + merge_weight·merges
+      + efficiency_weight·(code_lines / cost_usd ÷ churn_per_dollar_scale)
+      + breadth_weight·files_touched
+      − thrash_penalty·thrash
+score = round(100 · raw / (raw + saturation_k))
+```
+
+Commits, merges and files-touched come from **local git** (no network, no auth),
+diffed against a per-session baseline captured on the first render. Code churn
+and cost come from the statusline JSON, so the efficiency term works even outside
+a git repo. Git runs at most once per `cache_ttl_secs` behind a cache; the token
+terms refresh every render.
+
+**Token:** `$cship.impact`
+
+> **Threshold semantics are inverted vs other modules.** For impact, higher is
+> better, so `warn_threshold` / `critical_threshold` are *floors*: the score
+> escalates to `warn_style` at/below `warn_threshold` and `critical_style`
+> at/below `critical_threshold`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `disabled` | `bool` | `false` | Hide this module |
+| `style` | `string` | — | Base ANSI style |
+| `symbol` | `string` | `""` | Prefix symbol (e.g. `"⚡ "`) |
+| `label` | `bool` | `false` | Prepend `impact ` before the score |
+| `format` | `string` | `"[$symbol$value]($style)"` | Format string |
+| `warn_threshold` | `float` | `50.0` | Score at/**below** which `warn_style` applies |
+| `warn_style` | `string` | — | Style when score ≤ `warn_threshold` |
+| `critical_threshold` | `float` | `20.0` | Score at/**below** which `critical_style` applies |
+| `critical_style` | `string` | — | Style when score ≤ `critical_threshold` |
+| `show_delta` | `bool` | `true` | Append a per-turn delta marker (`▲+N` / `▼-N`) |
+| `commit_weight` | `float` | `4.0` | Weight per commit shipped this session |
+| `merge_weight` | `float` | `8.0` | Weight per merge landed this session |
+| `efficiency_weight` | `float` | `1.0` | Weight on token efficiency (churn per dollar) |
+| `breadth_weight` | `float` | `1.0` | Weight per file touched |
+| `thrash_penalty` | `float` | `3.0` | Penalty when cost is burned with no output |
+| `churn_per_dollar_scale` | `float` | `200.0` | Divisor keeping the efficiency term O(1) |
+| `saturation_k` | `float` | `10.0` | Saturation constant `K` — the main calibration knob |
+| `thrash_cost_threshold` | `float` | `0.10` | Cost (USD) above which a no-output session counts as thrash |
+| `cache_ttl_secs` | `int` | `5` | TTL for the cached git snapshot |
+
+**Variables:** `$value` (e.g. `62 ▲+4`), `$symbol`, `$style`
+
+The defaults for `saturation_k` and the thresholds are calibrated against 2404
+real git sessions (`scripts/calibrate_impact.py`): the median session scores
+~60, the top decile ~86. Re-run that script if you retune the weights.
+
+```toml
+[cship.impact]
+symbol             = "⚡ "
+style              = "bold green"
+warn_threshold     = 50
+warn_style         = "yellow"
+critical_threshold = 20
+critical_style     = "bold red"
+show_delta         = true
+```

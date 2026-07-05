@@ -5,6 +5,7 @@ pub mod config;
 pub mod context;
 pub mod explain;
 pub mod format;
+pub mod git;
 pub mod modules;
 pub mod passthrough;
 pub mod platform;

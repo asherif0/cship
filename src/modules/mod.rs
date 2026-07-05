@@ -4,6 +4,7 @@ pub mod context_bar;
 pub mod context_window;
 pub mod cost;
 pub mod effort;
+pub mod impact;
 pub mod model;
 pub mod peak_usage;
 pub mod session;
@@ -59,6 +60,7 @@ pub const ALL_NATIVE_MODULES: &[&str] = &[
     "cship.usage_limits.extra_usage",
     "cship.peak_usage",
     "cship.account",
+    "cship.impact",
 ];
 
 /// Static dispatch registry — the ONLY file modified when adding a new native module.
@@ -139,6 +141,7 @@ pub fn render_module(
         "cship.usage_limits.extra_usage" => usage_limits::render_extra_usage(ctx, cfg),
         "cship.peak_usage" => peak_usage::render(ctx, cfg),
         "cship.account" => account::render(ctx, cfg),
+        "cship.impact" => impact::render(ctx, cfg),
         other => {
             tracing::warn!("cship: unknown native module '{other}' — skipping");
             None
