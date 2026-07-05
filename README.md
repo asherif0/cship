@@ -126,7 +126,7 @@ signals:
 | Commits shipped this session | local `git` | `commit_weight` (4) |
 | Merges landed this session | local `git` | `merge_weight` (8) |
 | Token efficiency — code churn per `$` | statusline `total_lines_*` + `total_cost_usd` | `efficiency_weight` (1) |
-| Breadth — files touched | local `git` | `breadth_weight` (1) |
+| Breadth — files changed vs `HEAD` | local `git` (`git diff HEAD`) | `breadth_weight` (1) |
 | Anti-thrash — cost burned with nothing to show | `total_cost_usd` | `thrash_penalty` (−3) |
 
 ```
@@ -135,12 +135,15 @@ score = round(100 · raw / (raw + K))          # K = saturation_k (10)
 ```
 
 The score **saturates** (via `K`) so it stays in 0–100 and rewards early wins
-more than the 50th commit. Git counts are diffed against a **per-session
-baseline** captured on the session's first render, so the number reflects *this*
-session's work, not the repo's whole history. Git runs at most once per
+more than the 50th commit. **Commits and merges** are diffed against a
+**per-session baseline** captured on the session's first render, so shipped-work
+reflects *this* session, not the repo's whole history; **breadth** is the current
+uncommitted working tree (`git diff HEAD`). Git runs at most once per
 `cache_ttl_secs` (default 5s) behind a cache — the token terms refresh every
-turn, so the score reacts live without a `git` call per keystroke. Outside a git
-repo it degrades gracefully to the token-efficiency signal alone.
+render, so the score reacts live without a `git` call per keystroke. The trailing
+`▲/▼` delta (when `show_delta` is on) compares against the **previous render's**
+score, so it appears on the render where the number actually changes. Outside a
+git repo the score degrades gracefully to the token-efficiency signal alone.
 
 > `K` and the thresholds ship calibrated against 2404 real git sessions
 > (`scripts/calibrate_impact.py`): the median session scores ~60, the top decile
@@ -162,7 +165,7 @@ warn_threshold     = 50          # score ≤ 50 → warn colour
 warn_style         = "yellow"
 critical_threshold = 20          # score ≤ 20 → critical colour
 critical_style     = "bold red"
-show_delta         = true        # append a per-turn ▲/▼ delta
+show_delta         = true        # trailing ▲/▼ vs the previous render
 
 # ── optional score tuning (defaults shown) ──
 # commit_weight = 4.0
@@ -200,7 +203,7 @@ Ready-to-use configurations — from the recommended full-featured setup down to
 
 ### 1. ⚓ Hero / Recommended
 
-My personal setup, end to end. Top row: `$starship_prompt` running Starship's [Catppuccin Powerline preset](https://starship.rs/presets/catppuccin-powerline). Bottom row: model, effort, cost, context bar, 7-day per-model usage, extra credits, peak-hours indicator — thresholds escalate cool → warn → critical as budgets fill.
+My personal setup, end to end. Top row: `$starship_prompt` running Starship's [Catppuccin Powerline preset](https://starship.rs/presets/catppuccin-powerline). Bottom row: model, effort, cost, impact score, context bar — thresholds escalate cool → warn → critical as budgets fill. (Add `$cship.usage_limits` / `$cship.peak_usage` back to the `lines` row if you want API-budget tracking — see the showcases below.)
 
 <img src="./docs/examples/01.png" alt="Hero cship statusline example" width="600">
 
@@ -213,7 +216,7 @@ My personal setup, end to end. Top row: `$starship_prompt` running Starship's [C
 [cship]
 lines = [
   "$starship_prompt",
-  "$cship.model $cship.effort $cship.cost $cship.context_bar $cship.usage_limits $cship.peak_usage",
+  "$cship.model $cship.effort $cship.cost $cship.impact $cship.context_bar",
 ]
 
 [cship.model]
@@ -247,14 +250,14 @@ warn_style         = "fg:#e0af68"
 critical_threshold = 50
 critical_style     = "bold fg:#f7768e"
 
-[cship.usage_limits]
-five_hour_format   = " 5h {pct}% ({reset})"
-seven_day_format   = " 7d {pct}% ({reset})"
-separator          = " "
-warn_threshold     = 50.0
+[cship.impact]
+symbol             = "🎯 "
+style              = "bold fg:#9ece6a"
+warn_threshold     = 50          # score ≤ 50 → warn colour (floor semantics)
 warn_style         = "fg:#e0af68"
-critical_threshold = 80.0
+critical_threshold = 20          # score ≤ 20 → critical colour
 critical_style     = "bold fg:#f7768e"
+show_delta         = true        # trailing ▲/▼ vs the previous render
 ```
 
 **`~/.config/starship.toml`** — Starship's [Catppuccin Powerline preset](https://starship.rs/presets/catppuccin-powerline):

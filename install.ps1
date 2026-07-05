@@ -114,7 +114,7 @@ if (-not (Test-Path $CONFIG_FILE)) {
 [cship]
 lines = [
   "$directory$git_branch$git_status$python$nodejs$rust",
-  "$cship.model $cship.cost $cship.context_bar $cship.usage_limits"
+  "$cship.model $cship.cost $cship.impact $cship.context_bar"
 ]
 
 [cship.model]
@@ -137,14 +137,14 @@ warn_style         = "fg:#e0af68"
 critical_threshold = 5.0
 critical_style     = "bold fg:#f7768e"
 
-[cship.usage_limits]
-five_hour_format   = "⌛ 5h {pct}% ({reset})"
-seven_day_format   = "📅 7d {pct}% ({reset})"
-separator          = " "
-warn_threshold     = 60.0
+[cship.impact]
+symbol             = "🎯 "
+style              = "bold fg:#9ece6a"
+warn_threshold     = 50
 warn_style         = "fg:#e0af68"
-critical_threshold = 80.0
+critical_threshold = 20
 critical_style     = "bold fg:#f7768e"
+show_delta         = true
 '@
     [System.IO.File]::WriteAllText($CONFIG_FILE, $tomlContent, (New-Object System.Text.UTF8Encoding $false))
     Write-Host "Config written to: $CONFIG_FILE"
